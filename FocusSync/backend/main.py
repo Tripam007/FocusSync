@@ -102,4 +102,7 @@ def get_stats():
 # Serve frontend
 @app.get("/")
 def serve_frontend():
-    return FileResponse("../frontend/index.html")
+    frontend_path = Path("../frontend/index.html").resolve()
+    if not frontend_path.exists():
+        return {"error": f"Frontend not found at {frontend_path}"}
+    return FileResponse(str(frontend_path))
