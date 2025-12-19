@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>FocusSync — Deep Work, Smarter Breaks</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f8fafc;
+            color: #1e293b;
+        }
+        h1, h2 { text-align: center; }
+        .container { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+        button { padding: 10px 20px; margin: 8px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
+        .primary { background: #3b82f6; color: white; }
+        .danger { background: #ef4444; color: white; }
+        .success { background: #10b981; color: white; }
+        input, select { padding: 8px; margin: 5px; width: 100%; box-sizing: border-box; }
+        .timer { font-size: 3em; text-align: center; margin: 20px 0; font-weight: bold; color: #3b82f6; }
+        .hidden { display: none; }
+        .stats-box { background: #f1f5f9; padding: 15px; border-radius: 8px; margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <h1>🎯 FocusSync</h1>
+    <p style="text-align: center; color: #64748b;">Adaptive focus timer for deep work</p>
+
+    <div class="container">
+        <!-- Setup Phase -->
+        <div id="setup-view">
+            <h2>Start a Focus Session</h2>
+            <label>Task Difficulty</label>
+            <select id="difficulty">
+                <option value="1">Very Easy</option>
+                <option value="2">Easy</option>
+                <option value="3" selected>Moderate</option>
+                <option value="4">Hard</option>
+                <option value="5">Very Hard</option>
+            </select>
+            <br>
+            <button class="primary" onclick="startSession()">Begin Focus</button>
+        </div>
+
+        <!-- Timer Phase -->
+        <div id="timer-view" class="hidden">
+            <h2>Deep Work in Progress</h2>
+            <div class="timer" id="timer-display">25:00</div>
+            <p>Minimize distractions. Stay focused!</p>
+            <button class="danger" onclick="logDistraction()">I Got Distracted</button>
+            <button class="success" onclick="endSession(true)">Complete Session</button>
+            <button class="danger" onclick="endSession(false)">End Early</button>
+            <p id="distraction-count">Distractions: 0</p>
+        </div>
+
+        <!-- Results -->
+        <div id="result-view" class="hidden">
+            <h2>Session Complete!</h2>
+            <p>Focus Score: <strong id="score-result">--</strong>/100</p>
+            <p>Duration: <span id="duration-result"></span> min</p>
+            <button class="primary" onclick="showSetup()">Start New Session</button>
+        </div>
+
+        <!-- Stats -->
+        <div class="stats-box">
+            <h3>Your Progress</h3>
+            <p id="stats-content">Loading stats...</p>
+        </div>
+    </div>
+
+    <script>
+        let sessionId = null;
+        let focusMinutes = 25;
+        let timer = null;
+        let secondsLeft = 0;
+        let distractions = 0;
+
+        async function api(url, method = 'GET', body = null) {
+            const res = await fetch(url, {
+                method,
+                headers: body ? {'Content-Type': 'application/json'} : {},
+                body: body ? JSON.stringify(body) : null
+            });
+            if (!res.ok) throw await res.text();
+            return await res.json();
+        }
+
+        async function loadStats() {
+            try {
+                const stats = await api('/api/stats');
+                if (stats.message) {
+                    document.getElementById('stats-content').innerText = "Start your first session to see stats!";
+                } else {
+                    document.getElementById('stats-content').innerHTML = `
+                        📊 ${stats.total_sessions} sessions | 
+                        ⏱️ ${stats.avg_duration_min} min avg | 
+                        🧠 ${stats.avg_distractions.toFixed(1)} distractions | 
+                        ✅ ${stats.completion_rate_percent}% completed
+                    `;
+                }
+            } catch (e) {
+                console.error(e);
+                document.getElementById('stats-content').innerText = "Stats unavailable.";
+            }
+        }
+
+        async function startSession() {
+            const difficulty = parseInt(document.getElementById('difficulty').value);
+            try {
+                const res = await api('/api/session/start', 'POST', { task_difficulty: difficulty });
+                sessionId = res.session_id;
+                focusMinutes = res.focus_minutes;
+                secondsLeft = focusMinutes * 60;
+                distractions = 0;
+                document.getElementById('distraction-count').innerText = "Distractions: 0";
+                startTimer();
+                showView('timer');
+            } catch (e) {
+                alert("Failed to start session: " + e);
+            }
+        }
+
+        function startTimer() {
+            clearInterval(timer);
+            timer = setInterval(() => {
+                secondsLeft--;
+                const min = Math.floor(secondsLeft / 60);
+                const sec = secondsLeft % 60;
+                document.getElementById('timer-display').innerText = 
+                    `${min.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
+                if (secondsLeft <= 0) {
+                    clearInterval(timer);
+                    endSession(true); // Auto-complete if time runs out
+                }
+            }, 1000);
+        }
+
+        function logDistraction() {
+            distractions++;
+            document.getElementById('distraction-count').innerText = `Distractions: ${distractions}`;
+        }
+
+        async function endSession(completed) {
+            clearInterval(timer);
+            if (!sessionId) return;
+            try {
+                const res = await api(`/api/session/${sessionId}/end`, 'PUT', {
+                    distractions,
+                    completed
+                });
+                document.getElementById('score-result').innerText = res.focus_score;
+                document.getElementById('duration-result').innerText = res.duration_min;
+                showView('result');
+                loadStats();
+            } catch (e) {
+                alert("Error ending session: " + e);
+            }
+        }
+
+        function showView(view) {
+            document.getElementById('setup-view').classList.add('hidden');
+            document.getElementById('timer-view').classList.add('hidden');
+            document.getElementById('result-view').classList.add('hidden');
+            document.getElementById(`${view}-view`).classList.remove('hidden');
+        }
+
+        function showSetup() {
+            showView('setup');
+        }
+
+        // Init
+        loadStats();
+    </script>
+</body>
+</html>
